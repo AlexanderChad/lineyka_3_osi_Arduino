@@ -1,4 +1,5 @@
 #include <EEPROM.h>
+uint16_t EEMEM tolshchina_pily_addr;
 float EEMEM Koef_LineikyX_addr;
 float EEMEM Koef_LineikyY_addr;
 float EEMEM Koef_LineikyZ_addr;
@@ -6,6 +7,7 @@ int32_t EEMEM KVX_addr;
 int32_t EEMEM KVY_addr;
 int32_t EEMEM KVZ_addr;
 // NowPos / RealPos
+uint16_t tolshchina_pily = 1500; // в мкм, 0-9999 мкм
 float Koef_LineikyX = 0.05;
 float Koef_LineikyY = 0.05;
 float Koef_LineikyZ = 0.05;
@@ -44,6 +46,8 @@ uint8_t ERR_GetPos = 0;
 
 uint8_t Err_State = 0;
 
+uint8_t AM_Mode = 0;
+
 uint8_t ERR_KV = 0;
 uint8_t Pcz_KV = 5; //допуск концевиков
 
@@ -52,6 +56,12 @@ uint8_t Pcz_Y = 5; //допуск Y
 uint8_t Pcz_Z = 5; //допуск Z
 
 uint8_t Setting_Mode = 0;
+
+uint8_t Vvod_koord5 = 0;
+uint16_t X_k[5] = {0, 0, 0, 0, 0};
+uint16_t Y_k[5] = {0, 0, 0, 0, 0};
+uint16_t Z_k[5] = {0, 0, 0, 0, 0};
+uint8_t ZXY_select = 0;
 
 uint8_t GoTo_Mode = 0;
 
@@ -73,6 +83,8 @@ const int M[] = {A2, A3, A4, A5};   // пины столбцов
 
 #define debug
 #define debug_KV //концевики
+//#define debug_pos
+#define debug_k5
 
 //#include "LedControl.h"
 /* Data is shifted out of this pin*/
@@ -191,6 +203,7 @@ int32_t NullPosZ = 0;
 
 void setup() {
 #ifndef debug
+  EEPROM.get((int)&tolshchina_pily_addr, tolshchina_pily);
   EEPROM.get((int)&Koef_LineikyX_addr, Koef_LineikyX);
   EEPROM.get((int)&Koef_LineikyY_addr, Koef_LineikyY);
   EEPROM.get((int)&Koef_LineikyZ_addr, Koef_LineikyZ);
@@ -211,6 +224,8 @@ void setup() {
     digitalWrite(P[i], HIGH);
   }
 
+  pinMode(2, INPUT_PULLUP); // режим ручной/авт.
+
 #ifdef debug
   Serial.begin(9600);
   Serial.println("Lineika is begin");
@@ -223,6 +238,14 @@ void loop() {
   Check_KV();
   Update_Dv();
   Err_Checker();
+  AM_Mode_Checker();
+}
+void AM_Mode_Checker() {
+  if (digitalRead(2)) {
+    AM_Mode = 1;
+  } else {
+    AM_Mode = 0;
+  }
 }
 void Err_Checker() {
   Err_State = 0;
@@ -351,11 +374,11 @@ void GetPosXYZ() {
       NowPosX = Pos - NullPosX;
     } else {
       ERR_GetPos++;
-#ifdef debug
+#ifdef debug_pos
       Serial.println("X: ERR.RX");
 #endif
     }
-#ifdef debug
+#ifdef debug_pos
     Serial.print("X: ");
     Serial.println(Pos);
 #endif
@@ -379,11 +402,11 @@ void GetPosXYZ() {
       NowPosY = Pos - NullPosY;
     } else {
       ERR_GetPos++;
-#ifdef debug
+#ifdef debug_pos
       Serial.println("Y: ERR.RX");
 #endif
     }
-#ifdef debug
+#ifdef debug_pos
     Serial.print("Y: ");
     Serial.println(Pos);
 #endif
@@ -407,11 +430,11 @@ void GetPosXYZ() {
       NowPosZ = Pos - NullPosZ;
     } else {
       ERR_GetPos++;
-#ifdef debug
+#ifdef debug_pos
       Serial.println("Z: ERR.RX");
 #endif
     }
-#ifdef debug
+#ifdef debug_pos
     Serial.print("Z: ");
     Serial.println(Pos);
 #endif
@@ -459,7 +482,7 @@ void StateUpdate(uint8_t XYZ_Number, uint8_t PIN, uint8_t val) {
   }
 }
 void Display_XYZ(int32_t X_p, int32_t Y_p, int32_t Z_p) {
-  char StrDisplay[5];
+  char StrDisplay[8];
 
   sprintf(StrDisplay, "%4d", (int)X_p);
   DisplayText(0, StrDisplay);
@@ -469,23 +492,150 @@ void Display_XYZ(int32_t X_p, int32_t Y_p, int32_t Z_p) {
   DisplayText(2, StrDisplay);
 }
 
+void Display_XYZ_Points(uint8_t num_points) {
+  char StrDisplay[8];
+  String StrD_X = "";
+  String StrD_Y = "";
+  String StrD_Z = "";
+  if (Vvod_koord5 == 1) {
+    switch (ZXY_select) {
+      case 0:
+        StrD_X += X_k[0];
+        StrD_Y += Y_k[0];
+        StrD_Z += VvodUst;
+        break;
+      case 1:
+        StrD_X += VvodUst;
+        StrD_Y += Y_k[0];
+        StrD_Z += Z_k[0];
+        break;
+      case 2:
+        StrD_X += X_k[0];
+        StrD_Y += VvodUst;
+        StrD_Z += Z_k[0];
+        break;
+    }
+  } else {
+    StrD_X += X_k[0];
+    StrD_Y += Y_k[0];
+    StrD_Z += Z_k[0];
+  }
+  for (uint8_t i_k = 1; i_k < num_points; i_k++) {
+    StrD_X += ".";
+    StrD_Y += ".";
+    StrD_Z += ".";
+    switch (ZXY_select) {
+      case 0:
+        StrD_X += X_k[i_k];
+        StrD_Y += Y_k[i_k];
+        if ((Vvod_koord5 - 1) == i_k) {
+          StrD_Z += VvodUst;
+        } else {
+          StrD_Z += Z_k[i_k];
+        }
+        break;
+      case 1:
+        if ((Vvod_koord5 - 1) == i_k) {
+          StrD_X += VvodUst;
+        } else {
+          StrD_X += X_k[i_k];
+        }
+        StrD_Y += Y_k[i_k];
+        StrD_Z += Z_k[i_k];
+        break;
+      case 2:
+        StrD_X += X_k[i_k];
+        if ((Vvod_koord5 - 1) == i_k) {
+          StrD_Y += VvodUst;
+        } else {
+          StrD_Y += Y_k[i_k];
+        }
+        StrD_Z += Z_k[i_k];
+        break;
+    }
+  }
+
+  Disp_k5_make_char_buf(StrD_X, StrDisplay);
+  DisplayText(0, StrDisplay);
+#ifdef debug_k5
+  Serial.print("X_k5: ");
+  Serial.print(StrDisplay);
+#endif
+  Disp_k5_make_char_buf(StrD_Y, StrDisplay);
+  DisplayText(1, StrDisplay);
+#ifdef debug_k5
+  Serial.print(" Y_k5: ");
+  Serial.print(StrDisplay);
+#endif
+  Disp_k5_make_char_buf(StrD_Z, StrDisplay);
+  DisplayText(2, StrDisplay);
+#ifdef debug_k5
+  Serial.print(" Z_k5: ");
+  Serial.println(StrDisplay);
+#endif
+}
+void Disp_k5_make_char_buf(String XYZ_str, char StrD[]) {
+  int8_t ch_let = 0;
+  int8_t ch_num = 0;
+  int8_t ch_null = 0;
+  while ((ch_num < 4) && (XYZ_str.length() - ch_let)) {
+    char t_ch = XYZ_str[XYZ_str.length() - ch_let];
+    if (t_ch == 0) {
+      ch_num--;
+      ch_null++;
+    }
+    if (t_ch != '.') {
+      ch_num++;
+    }
+    ch_let++;
+  }
+  if (XYZ_str.length() - ch_let) {
+    ch_let -= ch_null;
+  }
+  for (uint8_t ib = 0; ib < 7; ib++) {
+    if (ib < ch_let) {
+      StrD[ib] = XYZ_str[XYZ_str.length() - ch_let + ib];
+    } else {
+      StrD[ib] = ' ';
+    }
+  }
+  StrD[7] = 0;
+}
+
 void Update_Display() {
   static uint32_t Disp_timer = 0;
   if (millis() - Disp_timer >= RTime_Display) { //периодическое обновление данных на дисплее
-    if (Setting_Mode) {
-      switch (GoTo_Mode) {
-        case 1:
-          Display_XYZ(VvodUst, round((float)SetPoint[1]*Koef_LineikyY), round((float)SetPoint[2]*Koef_LineikyZ));
-          break;
-        case 2:
-          Display_XYZ(round((float)SetPoint[0]*Koef_LineikyX), VvodUst, round((float)SetPoint[2]*Koef_LineikyZ));
-          break;
-        case 3:
-          Display_XYZ(round((float)SetPoint[0]*Koef_LineikyX), round((float)SetPoint[1]*Koef_LineikyY), VvodUst);
-          break;
-      }
-    } else {
-      Display_XYZ(round((float)NowPosX * Koef_LineikyX), round((float)NowPosY * Koef_LineikyY), round((float)NowPosZ * Koef_LineikyZ));
+    switch (Setting_Mode) {
+      case 1:
+        switch (GoTo_Mode) {
+          case 1:
+            Display_XYZ(VvodUst, round((float)SetPoint[1]*Koef_LineikyY), round((float)SetPoint[2]*Koef_LineikyZ));
+            break;
+          case 2:
+            Display_XYZ(round((float)SetPoint[0]*Koef_LineikyX), VvodUst, round((float)SetPoint[2]*Koef_LineikyZ));
+            break;
+          case 3:
+            Display_XYZ(round((float)SetPoint[0]*Koef_LineikyX), round((float)SetPoint[1]*Koef_LineikyY), VvodUst);
+            break;
+        }
+        if (Vvod_koord5) {
+          Display_XYZ_Points(Vvod_koord5);
+        }
+        break;
+      case 2:
+        char StrDisplay[8];
+        sprintf(StrDisplay, "t_PL");
+        DisplayText(0, StrDisplay);
+        sprintf(StrDisplay, "%4d", VvodUst);
+        DisplayText(1, StrDisplay);
+        sprintf(StrDisplay, "sett");
+        DisplayText(2, StrDisplay);
+        break;
+
+
+      default:
+        Display_XYZ(round((float)NowPosX * Koef_LineikyX), round((float)NowPosY * Koef_LineikyY), round((float)NowPosZ * Koef_LineikyZ));
+        break;
     }
     Disp_timer = millis();
   }
@@ -592,8 +742,15 @@ void Update_KB_4x4() {
                     //StateUpdate(X, 1, 0);
                     break;
                   case 3:
-
-
+                    if (Setting_Mode == 2) {
+                      tolshchina_pily = VvodUst;
+                      EEPROM.put((int)&tolshchina_pily_addr, tolshchina_pily);
+                      VvodUst = 0;
+                      Setting_Mode = 0;
+                    } else {
+                      Setting_Mode = 2;
+                      VvodUst = tolshchina_pily;
+                    }
                     break;
                 }
                 break;
@@ -662,6 +819,7 @@ void Update_KB_4x4() {
                     //StateUpdate(Z, 1, 0);
                     break;
                   case 3:
+                    //reset
 
                     break;
                 }
@@ -669,7 +827,15 @@ void Update_KB_4x4() {
               case 3:
                 switch (m) {
                   case 0:
-
+                    if (Vvod_koord5) {
+                      SaveK5();
+                      if (Vvod_koord5 < 5) {
+                        Vvod_koord5++;
+                      } else {
+                        Vvod_koord5 = 1;
+                      }
+                      LoadK5();
+                    }
                     break;
                   case 1:
                     if (Setting_Mode) {
@@ -677,10 +843,24 @@ void Update_KB_4x4() {
                     }
                     break;
                   case 2:
-
+                    if (Vvod_koord5) {
+                      if (ZXY_select < 2) {
+                        ZXY_select++;
+                        Vvod_koord5 = 1;
+                        LoadK5();
+                      } else {
+                        SaveK5();
+                        ZXY_select = 0;
+                        Setting_Mode = 0;
+                        Vvod_koord5 = 0;
+                      }
+                    }
                     break;
                   case 3:
-
+                    Setting_Mode = 1;
+                    Vvod_koord5 = 1;
+                    ZXY_select = 0;
+                    LoadK5();
                     break;
                 }
                 break;
@@ -801,5 +981,31 @@ void Update_KB_4x4() {
       VvodUst = 0;
     }
     KB_timer = millis();
+  }
+}
+void SaveK5() {
+  switch (ZXY_select) {
+    case 0:
+      Z_k[Vvod_koord5 - 1] = VvodUst;
+      break;
+    case 1:
+      X_k[Vvod_koord5 - 1] = VvodUst;
+      break;
+    case 2:
+      Y_k[Vvod_koord5 - 1] = VvodUst;
+      break;
+  }
+}
+void LoadK5() {
+  switch (ZXY_select) {
+    case 0:
+      VvodUst = Z_k[Vvod_koord5 - 1];
+      break;
+    case 1:
+      VvodUst = X_k[Vvod_koord5 - 1];
+      break;
+    case 2:
+      VvodUst = Y_k[Vvod_koord5 - 1];
+      break;
   }
 }
